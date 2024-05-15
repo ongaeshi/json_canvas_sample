@@ -1,49 +1,60 @@
 require 'json_canvas'
-require 'find'
+require 'fileutils'
 
-def create_file_tree(directory)
-  jc = JsonCanvas.create
-  root = jc.add_text(id: "root", x: 0, y: 0, width: 200, height: 50, text: File.basename(directory), color: "2")
+def add_node(canvas, path, depth, y_position, is_directory)
+  name = File.basename(path)
+  x_position = depth * 300
+  color = is_directory ? '3' : ''
+  node = canvas.add_text(id: path, x: x_position, y: y_position, text: name, color: color)
+  node
+end
 
-  nodes = { directory => { node: root, x: 0, y: 0 } }
-  level_spacing = 100
-  sibling_spacing = 50
+def add_edge(canvas, parent_node, child_node)
+  canvas.add_edge(fromNode: parent_node.id, toNode: child_node.id)
+end
 
-  Find.find(directory) do |path|
-    next if path == directory || path.include?("/.git") || File.basename(path) == ".git"
+def explore_directory(canvas, root_node, dir_path, depth = 0, y_position = 0)
+  entries = Dir.entries(dir_path).reject { |entry| entry == '.' || entry == '..' || entry == '.git' }
+  previous_sibling_max_y = y_position
 
-    parent_dir = File.dirname(path)
-    parent_info = nodes[parent_dir]
-    parent_node = parent_info[:node]
+  entries.each do |entry|
+    entry_path = File.join(dir_path, entry)
+    is_directory = File.directory?(entry_path)
+    current_node = add_node(canvas, entry_path, depth, previous_sibling_max_y, is_directory)
 
-    x = parent_info[:x] + sibling_spacing
-    y = parent_info[:y] + level_spacing
-
-    if File.directory?(path)
-      dir_node = jc.add_text(id: path, x: x, y: y, width: 200, height: 50, text: File.basename(path), color: "3")
-      nodes[path] = { node: dir_node, x: x, y: y }
-      jc.add_edge(fromNode: parent_node.id, toNode: dir_node.id)
-    else
-      file_node = jc.add_text(id: path, x: x, y: y, width: 200, height: 50, text: File.basename(path), color: "4")
-      jc.add_edge(fromNode: parent_node.id, toNode: file_node.id)
+    if depth > 1
+      parent_path = File.dirname(entry_path)
+      parent_node = canvas.nodes.find { |node| node.id == parent_path }
+      add_edge(canvas, parent_node, current_node) if parent_node
+    elsif depth == 1
+      add_edge(canvas, root_node, current_node)
     end
 
-    # Adjust parent coordinates for the next sibling
-    parent_info[:x] = x
-    parent_info[:y] = [parent_info[:y], y + sibling_spacing].max
+    if is_directory
+      child_y_position = previous_sibling_max_y + 80
+      previous_sibling_max_y = explore_directory(canvas, root_node, entry_path, depth + 1, child_y_position)
+    end
+
+    previous_sibling_max_y += 80
   end
 
-  jc
+  previous_sibling_max_y
 end
 
-def save_canvas(jc, filename)
-  jc.save(filename)
+# メインスクリプト
+def generate_file_tree(dir_path)
+  jc = JsonCanvas.create
+  root_node = add_node(jc, dir_path, 0, 0, true)
+  explore_directory(jc, root_node, dir_path, 1, 100)
+  jc.save("file_tree.canvas")
+  puts "File tree saved to file_tree.canvas"
 end
 
-directory = ARGV[0] || "."
-output_file = ARGV[1] || "file_tree.canvas"
+# コマンドライン引数からディレクトリパスを取得
+if ARGV.length != 1
+  puts "Usage: ruby script.rb <directory_path>"
+  exit 1
+end
 
-jc = create_file_tree(directory)
-save_canvas(jc, output_file)
-
-puts "File tree saved to #{output_file}"
+directory_path = ARGV[0]
+generate_file_tree(directory_path)
